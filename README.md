@@ -1,14 +1,24 @@
 IF OBJECT_ID ('sp_hexadecimal') IS NOT NULL
+
  DROP PROCEDURE sp_hexadecimal
 GO
+
 CREATE PROCEDURE sp_hexadecimal
+
  @binvalue varbinary(256),
+ 
  @hexvalue varchar (514) OUTPUT
+ 
 AS
+
 DECLARE @charvalue varchar (514)
+
 DECLARE @i int
+
 DECLARE @length int
+
 DECLARE @hexstring char(16)
+
 SELECT @charvalue = '0x'
 SELECT @i = 1
 SELECT @length = DATALENGTH (@binvalue)
