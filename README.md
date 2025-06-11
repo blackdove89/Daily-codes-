@@ -1,283 +1,132 @@
-IF OBJECT_ID ('sp_hexadecimal') IS NOT NULL
+--Running find claim script to generate a claim to update
+SELECT    
+      DISTINCT d.CaseId, d.Claim, Status, k.Email Specialist, l.Email Reviewer
+   FROM        
+      dbo.vwCases d
+         JOIN vwCaseServiceSummary e ON d.caseid = e.caseid
+            JOIN vwCodeList m ON e.RetirementTypeId = m.CodeId
+         JOIN dbo.tblResults A ON a.CaseId = d.CaseId
+         JOIN dbo.tblAdjustments b ON d.CaseId = b.CaseId
+            JOIN dbo.vwCodeList c ON b.AddDeductCodeId = c.CodeId      
+         LEFT JOIN tblAnnuitySupplement h on d.Caseid = h.CaseId
+         JOIN rvwUserList k on d.specialist = k.login
+         JOIN rvwUserList l on d.reviewer = l.login
+   WHERE    
+    --d.Status = '300' AND
+      c.CodeType = 'AddDeductCodes' AND
+      c.CodeAbbrev = '67' AND
+      b.RunType = (SELECT o.RunType FROM tblRunResults o WHERE b.CaseId = o.CaseId AND btriggered = 1) AND -- incluse AS fromn the trigger run
+      e.CaseType IN(2, 3) AND
+     RetirementTypeId <> (select [dbo].[fGetCodeId]('C','SepCodes')) AND -- exclude old 6C
+      EXISTS(SELECT 1 FROM tblRunResults f where d.caseid = f.caseid and (CalcRetirementType <> 'C' OR CalcRetirementType IS NULL) AND bTriggered = 1) AND  -- exclude new 6C
+      a.ASSystem_BeginDate > a.AnnuityStartDate
+	--AND
+     --ISNULL(ASUser_BeginDate, a.ASSystem_BeginDate) >= @CheckDate  
 
- DROP PROCEDURE sp_hexadecimal
+--Step 1..Set Status
+USE [RETIRE]
+GO
+
+DECLARE	@return_value int,
+		@Msg varchar(2000)
+
+EXEC	@return_value = [dbo].[spSetStatus]
+		@CaseId = 31240,
+		@Status = 300,
+		@Login = N'<system>',
+		@Msg = @Msg OUTPUT
+
+SELECT	@Msg as N'@Msg'
+
+SELECT	'Return Value' = @return_value
 
 GO
 
-CREATE PROCEDURE sp_hexadecimal
+--Step 2 update date.
 
- @binvalue varbinary(256),
+SELECT TOP (1000) [CaseId],
+[ASSystem_BeginDate]
+      
+  FROM [RETIRE].[dbo].[tblResults]
+  --WHERE ASSystem_BeginDate >='2025-07-01 00:00:00.000'
+  --AND
+    WHERE CaseId = 31240
 
- @hexvalue varchar (514) OUTPUT
 
-AS
+	UPDATE tblResults
+	SET ASSystem_BeginDate = '2025-09-12'
+	WHERE CaseId = 31240
 
-DECLARE @charvalue varchar (514)
+	--confirm claim is available in table by running the entire find claim script
 
-DECLARE @i int
+--Step 3 running all to check claim
+	DECLARE @CutOffDate DATETIME
+DECLARE @CheckDate DATETIME
 
-DECLARE @length int
 
-DECLARE @hexstring char(16)
+SELECT
+   @CutOffDate = MIN(CutOffDate)
+FROM
+   rtblCutOff WHERE CutOffDate > GetDate() - 1  
 
-SELECT @charvalue = '0x'
+SET @CutOffDate = DATEADD(m, 1, @CutOffDate)
 
-SELECT @i = 1
+SET @CheckDate = CAST(MONTH(@CutOffDate) AS VARCHAR(2)) + '/01/' + CAST(YEAR(@CutOffDate) AS VARCHAR(4))
 
-SELECT @length = DATALENGTH (@binvalue)
 
-SELECT @hexstring = '0123456789ABCDEF'
+SELECT    
+      DISTINCT d.CaseId, d.Claim, Status, k.Email Specialist, l.Email Reviewer
+   FROM        
+      dbo.vwCases d
+         JOIN vwCaseServiceSummary e ON d.caseid = e.caseid
+            JOIN vwCodeList m ON e.RetirementTypeId = m.CodeId
+         JOIN dbo.tblResults A ON a.CaseId = d.CaseId
+         JOIN dbo.tblAdjustments b ON d.CaseId = b.CaseId
+            JOIN dbo.vwCodeList c ON b.AddDeductCodeId = c.CodeId      
+         LEFT JOIN tblAnnuitySupplement h on d.Caseid = h.CaseId
+         JOIN rvwUserList k on d.specialist = k.login
+         JOIN rvwUserList l on d.reviewer = l.login
+   WHERE    
+    d.Status = '300' AND
+      c.CodeType = 'AddDeductCodes' AND
+      c.CodeAbbrev = '67' AND
+      b.RunType = (SELECT o.RunType FROM tblRunResults o WHERE b.CaseId = o.CaseId AND btriggered = 1) AND -- incluse AS fromn the trigger run
+      e.CaseType IN(2, 3) AND
+     RetirementTypeId <> (select [dbo].[fGetCodeId]('C','SepCodes')) AND -- exclude old 6C
+      EXISTS(SELECT 1 FROM tblRunResults f where d.caseid = f.caseid and (CalcRetirementType <> 'C' OR CalcRetirementType IS NULL) AND bTriggered = 1) AND  -- exclude new 6C
+      a.ASSystem_BeginDate > a.AnnuityStartDate
+	AND
+     ISNULL(ASUser_BeginDate, a.ASSystem_BeginDate) >= @CheckDate  
 
-WHILE (@i <= @length)
-
-BEGIN
-
- DECLARE @tempint int
-
- DECLARE @firstint int
-
- DECLARE @secondint int
-
- SELECT @tempint = CONVERT(int, SUBSTRING(@binvalue,@i,1))
-
- SELECT @firstint = FLOOR(@tempint/16)
-
- SELECT @secondint = @tempint - (@firstint*16)
-
- SELECT @charvalue = @charvalue +
-
- SUBSTRING(@hexstring, @firstint+1, 1) +
-
- SUBSTRING(@hexstring, @secondint+1, 1)
-
- SELECT @i = @i + 1
-
-END
-
-SELECT @hexvalue = @charvalue
-
+--Step 4 update recipients email
+USE [RETIRE]
 GO
 
---DROP and CREATE sp_help_revlogin SP
-
-IF OBJECT_ID ('sp_help_revlogin') IS NOT NULL
-
- DROP PROCEDURE sp_help_revlogin
-
+UPDATE [dbo].[rtblReportEmailAddresses]
+   SET 
+      [Recipients] = 'Adekunle.keshiro@opm.gov; jenn-rong.chen@opm.gov;malathi.thadkamalla@opm.gov;'
+      ,[Copy] = 'Adekunle.keshiro@opm.gov; jenn-rong.chen@opm.gov;malathi.thadkamalla@opm.gov;'
+      ,[BlindCopy] = 'Adekunle.keshiro@opm.gov; jenn-rong.chen@opm.gov;malathi.thadkamalla@opm.gov;'
+      ,[ErrorRecipients] = 'Adekunle.keshiro@opm.gov; jenn-rong.chen@opm.gov;malathi.thadkamalla@opm.gov;'
+      ,[AdminRecipients] = 'Adekunle.keshiro@opm.gov; jenn-rong.chen@opm.gov;malathi.thadkamalla@opm.gov;'
+ WHERE [ReportName] = 'Move Future AS cases back to EDIT' 
 GO
 
-CREATE PROCEDURE [dbo].[sp_help_IE_Prod_revlogin] @login_name sysname = NULL AS
-
-DECLARE @name sysname
-
-DECLARE @type varchar (1)
-
-DECLARE @hasaccess int
-
-DECLARE @denylogin int
-
-DECLARE @is_disabled int
-
-DECLARE @PWD_varbinary varbinary (256)
-
-DECLARE @PWD_string varchar (514)
-
-DECLARE @SID_varbinary varbinary (85)
-
-DECLARE @SID_string varchar (514)
-
-DECLARE @tmpstr varchar (1024)
-
-DECLARE @is_policy_checked varchar (3)
-
-DECLARE @is_expiration_checked varchar (3)
-
-DECLARE @defaultdb sysname
-
-IF (@login_name IS NULL)
-
-DECLARE login_curs CURSOR FOR
-
-SELECT p.sid, p.name, p.type, p.is_disabled, p.default_database_name, l.hasaccess, l.denylogin
-
-FROM sys.server_principals p
-
-LEFT JOIN
-
-sys.syslogins l
-
-ON
-
-(l.name = p.name)
-
-JOIN
-
-IE_PROD.sys.sysusers IE_PROD on (l.sid = IE_PROD.sid)
-
-WHERE p.type IN ( 'S', 'G', 'U' )
-
-AND
-
-p.name <> 'sa'
-
-ELSE
-
-DECLARE login_curs CURSOR FOR
-
-SELECT p.sid, p.name, p.type, p.is_disabled, p.default_database_name, l.hasaccess, l.denylogin
-
-FROM sys.server_principals p
-
-LEFT JOIN
-
-sys.syslogins l
-
-ON (l.name = p.name)
-
-JOIN
-
-IE_PROD.sys.sysusers IE_PROD on (l.sid = IE_PROD.sid)
-
-WHERE p.type IN ( 'S', 'G', 'U' )
-
-AND
-
-p.name = @login_name
-
-OPEN login_curs
-
-FETCH NEXT FROM login_curs INTO @SID_varbinary, @name, @type, @is_disabled, @defaultdb, @hasaccess, @denylogin
-
-IF (@@fetch_status = -1)
-
-BEGIN
-
- PRINT 'No login(s) found.'
-
- CLOSE login_curs
-
- DEALLOCATE login_curs
-
- RETURN -1
-
-END
-
-SET @tmpstr = '/* sp_help_revlogin script '
-
-PRINT @tmpstr
-
-SET @tmpstr = '** Generated ' + CONVERT (varchar, GETDATE()) + ' on ' + @@SERVERNAME + ' */'
-
-PRINT @tmpstr
-
-PRINT ''
-
-WHILE (@@fetch_status <> -1)
-
-BEGIN
-
- IF (@@fetch_status <> -2)
-
- BEGIN
-
- PRINT ''
-
- SET @tmpstr = '-- Login: ' + @name
-
- PRINT @tmpstr
-
- IF (@type IN ( 'G', 'U'))
-
- BEGIN -- NT authenticated account/group
-
- SET @tmpstr = 'CREATE LOGIN ' + QUOTENAME( @name ) + ' FROM WINDOWS WITH DEFAULT_DATABASE = [' + @defaultdb + ']'
-
- END
-
- ELSE BEGIN -- SQL Server authentication
-
- -- obtain password and sid
-
- SET @PWD_varbinary = CAST( LOGINPROPERTY( @name, 'PasswordHash' ) AS varbinary (256) )
-
- EXEC sp_hexadecimal @PWD_varbinary, @PWD_string OUT
-
- EXEC sp_hexadecimal @SID_varbinary,@SID_string OUT
-
- -- obtain password policy state
-
- SELECT @is_policy_checked = CASE is_policy_checked WHEN 1 THEN 'ON' WHEN 0 THEN 'OFF' ELSE NULL END FROM sys.sql_logins WHERE name = @name
-
- SELECT @is_expiration_checked = CASE is_expiration_checked WHEN 1 THEN 'ON' WHEN 0 THEN 'OFF' ELSE NULL END FROM sys.sql_logins WHERE name = @name
-
- SET @tmpstr = 'CREATE LOGIN ' + QUOTENAME( @name ) + ' WITH PASSWORD = ' + @PWD_string + ' HASHED, SID = ' + @SID_string + ', DEFAULT_DATABASE = [' + @defaultdb + ']'
-
- IF ( @is_policy_checked IS NOT NULL )
-
- BEGIN
-
- SET @tmpstr = @tmpstr + ', CHECK_POLICY = ' + @is_policy_checked
-
- END
-
- IF ( @is_expiration_checked IS NOT NULL )
-
- BEGIN
-
- SET @tmpstr = @tmpstr + ', CHECK_EXPIRATION = ' + @is_expiration_checked
-
- END
-
- END
-
- IF (@denylogin = 1)
-
- BEGIN -- login is denied access
-
- SET @tmpstr = @tmpstr + '; DENY CONNECT SQL TO ' + QUOTENAME( @name )
-
- END
-
- ELSE IF (@hasaccess = 0)
-
- BEGIN -- login exists but does not have access
-
- SET @tmpstr = @tmpstr + '; REVOKE CONNECT SQL TO ' + QUOTENAME( @name )
-
- END
-
- IF (@is_disabled = 1)
-
- BEGIN -- login is disabled
-
- SET @tmpstr = @tmpstr + '; ALTER LOGIN ' + QUOTENAME( @name ) + ' DISABLE'
-
- END
-
- PRINT @tmpstr
-
- END
-
- FETCH NEXT FROM login_curs INTO @SID_varbinary, @name, @type, @is_disabled, @defaultdb, @hasaccess, @denylogin
-
- END
-
-CLOSE login_curs
-
-DEALLOCATE login_curs
-
-RETURN 0
-
+--Step 5 Add email to white list
+USE [RETIRE]
 GO
 
---execute the SP to get the scripts
-
-EXEC [dbo].[sp_help_IE_PROD_revlogin]
-
+INSERT INTO [dbo].[rtblReportWhiteListEmailAddresses]
+           ([EmailAddress])
+     VALUES
+           ('Adekunle.keshiro@opm.gov')
 GO
 
---drop the SP after the scripts are printed (no longer necessary to keep)
+--Step 6 Run Move Future AS cases back to EDIT script to update job 
+"C:\Users\DCTCRCTECAYK\Desktop\Hardcode Rewrite\Move Future AS cases back to EDIT.sql"
 
-DROP PROCEDURE [dbo].[sp_help_IE_PROD_revlogin]
+--Step 7 Run job at step 3 only
+Change step 3 of job settings to complete job reporting success
+Run job starting at step3
 
-GO
+
